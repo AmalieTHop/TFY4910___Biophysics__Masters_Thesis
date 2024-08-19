@@ -1,3 +1,15 @@
+"""
+June 2024 by Amalie Toftum Hop
+https://github.com/AmalieTHop/TFY4910___Biophysics__Masters_Thesis
+
+Code is uploaded as part of a Master’s thesis: 
+Amalie Toftum Hop. “Deep Learning-Based Intravoxel Incoherent Motion Modelling of
+Diffusion-Weighted MRI in Head and Neck Cancer: In Silico and In Vivo Studies.
+Master thesis. Norwegian University of Science and Technology, 2024.
+"""
+
+
+
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
@@ -5,24 +17,9 @@ import matplotlib.ticker
 import seaborn as sns
 sns.set_theme()
 
-import glob
 import os
-from tueplots import figsizes, fonts
-from scipy.stats import wilcoxon
-
-
-class OOMFormatter(matplotlib.ticker.ScalarFormatter):
-    def __init__(self, order=0, fformat='%.0f', offset=True, mathText=True):
-        self.oom = order
-        self.fformat = fformat
-        matplotlib.ticker.ScalarFormatter.__init__(self,useOffset=offset,useMathText=mathText)
-    def _set_order_of_magnitude(self):
-        self.orderOfMagnitude = self.oom
-    def _set_format(self, vmin=None, vmax=None):
-        self.format = self.fformat
-
-
-
+from tueplots import fonts
+import analysis.utils as from_utils
 
 
 
@@ -35,13 +32,21 @@ class Patient_populationA_plot:
                 os.makedirs(self.dir_out)
 
         self.df_param_stats = pd.read_csv(f'../dataA/analysis/df_param_stats_{training_method}.csv')
-        self.df_param_diff_stats = pd.read_csv(f'../dataA/analysis/df_param_diff_stats_{training_method}.csv')
+        self.df_param_diff_stats = pd.read_csv(f'../dataA/analysis/df_param_diffs_stats_{training_method}.csv')
         self.df_CV_stats = pd.read_csv(f'../dataA/analysis/df_CV_stats_{training_method}.csv')
 
 
-    def plot_ivim_params_stats(self):
 
-        # Preparations
+
+
+    def plt_ivimparams_and_signalrmse_stats(self):
+        """
+        Generates box plots with supporting violin plots of the intra-GTVn medians of the IVIM parameters, together 
+        with the intra-GTVn medians of the signal-RMSE, estimated by the four algorithms. 
+        (Figure 4.18) 
+        """
+
+        # plotting
         sns.set_theme()
         sns.set_style('whitegrid')
         params = {'axes.labelsize': 25,
@@ -54,12 +59,11 @@ class Patient_populationA_plot:
         plt.rcParams.update(fonts.neurips2021())
         plt.rcParams.update(params)
 
-        #boxprops={'alpha': 1}
         showfliers = True
         palette = ['steelblue', 'tomato']
         cut = 0
 
-        # Plotting
+
         fig, axes = plt.subplots(nrows=4, ncols=1, figsize=(10, 15))
         [ax0, ax1, ax2, ax3] = axes
 
@@ -97,8 +101,8 @@ class Patient_populationA_plot:
         ax2.set(xlabel=None, ylabel = r'Median $D_p$ [mm$^2$/s]')
         ax3.set(xlabel=None, ylabel = r'Median signal-RMSE')
 
-        ax0.yaxis.set_major_formatter(OOMFormatter(-3, "%.1f"))
-        ax2.yaxis.set_major_formatter(OOMFormatter(-3, "%.0f"))
+        ax0.yaxis.set_major_formatter(from_utils.OOMFormatter(-3, "%.1f"))
+        ax2.yaxis.set_major_formatter(from_utils.OOMFormatter(-3, "%.0f"))
 
         ax0.legend().set_visible(False); ax1.legend().set_visible(False); ax2.legend().set_visible(False); ax3.legend().set_visible(False)
 
@@ -108,11 +112,18 @@ class Patient_populationA_plot:
         fig.tight_layout()
         plt.savefig(os.path.join(self.dir_out, f'patientA_population_params.pdf'), bbox_inches='tight')
 
+
+
         
 
-    def plot_ivim_param_diffs_stats(self):
+    def plt_ivim_param_diffs_stats(self):
+        """
+        Generates box plots with supporting violin plots of the intra-GTVn mean absolute differences of the estimated IVIM 
+        parameters generated with 5 and 4 b-values. 
+        (Figure 4.19) 
+        """
 
-        # Preparations
+        # plotting
         sns.set_theme()
         sns.set_style('whitegrid')
         params = {'axes.labelsize': 25,
@@ -129,7 +140,7 @@ class Patient_populationA_plot:
         palette = ['steelblue', 'coral', 'palevioletred', 'mediumseagreen']
         cut = 0
 
-        # Plotting
+
         fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(10, 15))
         [ax0, ax1, ax2] = axes
 
@@ -163,17 +174,24 @@ class Patient_populationA_plot:
         ax1.set(xlabel=None, ylabel = r'Mean difference $f_p$')
         ax2.set(xlabel=None, ylabel = r'Mean difference $D_p$ [mm$^2$/s]')
 
-        ax0.yaxis.set_major_formatter(OOMFormatter(-3, "%.1f"))
-        ax2.yaxis.set_major_formatter(OOMFormatter(-3, "%.0f"))
+        ax0.yaxis.set_major_formatter(from_utils.OOMFormatter(-3, "%.1f"))
+        ax2.yaxis.set_major_formatter(from_utils.OOMFormatter(-3, "%.0f"))
 
         fig.tight_layout()
         plt.savefig(os.path.join(self.dir_out, f'patientA_population_param_diffs.pdf'), bbox_inches='tight')
 
 
 
-    def plot_CV_stats(self):
 
-        # Preparations
+
+    def plt_CV_stats(self):
+        """
+        Generates box plots with supporting violin plots of intra-GTVn medians of CV for each of the IVIM 
+        parameter predicted by DNN_SSL. 
+        (Figure 4.17)
+        """
+
+        # plotting
         sns.set_theme()
         sns.set_style('whitegrid')
         params = {'axes.labelsize': 25,
@@ -191,8 +209,8 @@ class Patient_populationA_plot:
         cut=0
 
 
-        # Plotting
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(10, 5))
+
 
         sns.violinplot(ax=ax, data=self.df_CV_stats, x='param', y='param_val', hue='num_bvals', hue_order = ['5 b-values', '4 b-values'], inner=None, palette=palette, alpha=0.25, saturation=1, width=0.9, split=True, gap=0.05, cut=cut, legend=False)
         ax = sns.boxplot(ax=ax, data=self.df_CV_stats, x='param', y='param_val', hue='num_bvals', hue_order = ['5 b-values', '4 b-values'], palette=palette, showfliers=showfliers, saturation=1, width=0.25, gap=0.25)
@@ -227,12 +245,14 @@ class Patient_populationA_plot:
 
 
 
-
-
     def print_ivim_params_stats(self, plot_name, num_bvals):
+        """
+        Prints ....
+        """
+
         if plot_name == 'params':
             df = self.df_param_stats
-            description = 'IVIM parmaters and singal-RMSE'
+            description = 'IVIM parameters and singal-RMSE'
             ivim_params = [r'$D_t$', r'$f_p$', r'$D_p$', 'signal-RMSE']
             factor = [1000, 1, 1000, 1]
         elif plot_name == 'param_diffs':
@@ -298,24 +318,3 @@ class Patient_populationA_plot:
                 q1, q3 = np.percentile(filtered, [25 ,75])
 
                 print(f'{param}: \t\t Q2: {np.median(filtered):.2f},\t Q1: {q1:.2f} \t Q3: {q3:.2f}')
-
-
-
-    def print_wilcoxon_signed_rank_test(self):
-        df = self.df_param_stats
-        ivim_params = [r'$D_t$', r'$f_p$', r'$D_p$', 'signal-RMSE']
-        methods = ['LSQ', 'SEG', r'$\mathregular{DNN_{SL}}$', r'$\mathregular{DNN_{SSL}}$']
-        factor = [1000, 1, 1000, 1]
-
-        for i, param in enumerate(ivim_params):
-            print('******************************************************************')
-            print(param)
-            print()
-            for j, method in enumerate(methods):
-
-
-                b5_filtered = df[(df.num_bvals == '5 b-values') & (df.param == param) & (df.method == method)]['param_val'].to_numpy()*factor[i]
-                b4_filtered = df[(df.num_bvals == '4 b-values') & (df.param == param) & (df.method == method)]['param_val'].to_numpy()*factor[i]
-
-                res = wilcoxon(b5_filtered, b4_filtered)
-                print(f'{method}:\t\t {res}')

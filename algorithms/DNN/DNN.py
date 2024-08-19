@@ -8,20 +8,19 @@ Built on code by Sebastiano Barbieri: https://github.com/sebbarb/deep_ivim
 Code is uploaded as part of our publication in MRM (Kaandorp et al. Improved physics-informed deep learning of the intravoxel-incoherent motion model: accurate, unique and consistent. MRM 2021)
 If this code was useful, please cite:
 https://doi.org/10.1002/mrm.27910
-
-requirements:
-numpy
-torch
-tqdm
-matplotlib
-scipy
-joblib
 """
 
 """
 Modified:
 June 2024 by Amalie Toftum Hop
+https://github.com/AmalieTHop/TFY4910___Biophysics__Masters_Thesis
+
+Code is uploaded as part of a Master’s thesis: 
+Amalie Toftum Hop. “Deep Learning-Based Intravoxel Incoherent Motion Modelling of
+Diffusion-Weighted MRI in Head and Neck Cancer: In Silico and In Vivo Studies.
+Master thesis. Norwegian University of Science and Technology, 2024.
 """
+
 
 # import libraries
 import numpy as np
@@ -30,33 +29,17 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data as utils
 from tqdm import tqdm
-import os
 import copy
 import warnings
 
-from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import algorithms.utils as from_utils
 
 
-class RMSELoss(nn.Module):
-    def __init__(self, eps=1e-9):
-        super().__init__()
-        self.mse = nn.MSELoss(reduction = 'none')
-        self.eps = eps
-        self.rmse = None
-        
-    def forward(self, yhat, y, reduction='mean'):
-        se = self.mse(yhat,y)                            # sqared error
-        self.rmse = torch.sqrt(torch.mean(se, dim=-1))   # rms error
-        if reduction=='none':
-            return self.rmse
-        elif reduction=='mean':
-            mean_rmse = torch.mean(self.rmse)            # mean rms error for batch
-            return mean_rmse
-    
 
-# Define the neural network.
+
+
+# the neural network.
 class Net(nn.Module):
     def __init__(self, bvalues, net_pars):
 
@@ -111,7 +94,7 @@ class Net(nn.Module):
                     self.fc_layers2.extend([nn.Dropout(self.net_pars.dropout)])
                     self.fc_layers3.extend([nn.Dropout(self.net_pars.dropout)])
 
-        # Final layer yielding output
+        # final layer yielding output
         if self.net_pars.parallel:
             self.encoder0 = nn.Sequential(*self.fc_layers0, nn.Linear(self.net_pars.width, 1))
             self.encoder1 = nn.Sequential(*self.fc_layers1, nn.Linear(self.net_pars.width, 1))
@@ -130,6 +113,7 @@ class Net(nn.Module):
             if self.net_pars.fitS0:
                 params3 = self.encoder3(X)
 
+        # output activation function
         X_temp=[]
         const = 1.0
         if self.net_pars.con == 'relu6':
@@ -144,6 +128,7 @@ class Net(nn.Module):
         else:
             raise Exception('the chose parameter constraint is not implemented. Try ''relu6'', ''sigmoid'', ''none'' or ''abs''')
         
+        # normalised ivim parameter outputs
         if self.net_pars.parallel:
             Dt_norm = output_activation(params0[:, 0].unsqueeze(1))/const
             Fp_norm = output_activation(params1[:, 0].unsqueeze(1))/const
@@ -156,8 +141,11 @@ class Net(nn.Module):
             Dp_norm = output_activation(params0[:, 2].unsqueeze(1))/const
             if self.net_pars.fitS0:
                 S0_norm = output_activation(params0[:, 3].unsqueeze(1))/const
+        
+        # scaled ivim parameter outputs
         [Dt_unorm, Fp_unorm, Dp_unorm, S0_unorm] = from_utils.unormalise_params([Dt_norm, Fp_norm, Dp_norm, S0_norm], self.net_pars.bounds)
-
+        
+        # uses the ivim model to recondtruct the ivim signal sequences
         if self.net_pars.fitS0:
             X_temp.append(S0_unorm * (Fp_unorm * torch.exp(-self.bvalues * Dp_unorm) + (1 - Fp_unorm) * torch.exp(-self.bvalues * Dt_unorm)))
         else:
@@ -176,26 +164,28 @@ class Net(nn.Module):
 
 
 def learn_selfsupervised(X, bvalues, arg):
+    """
+    Trains self-supervised DNN with hyperparameters given by 'arg' using the training data 'X'.
+    """
 
     torch.backends.cudnn.benchmark = True
     arg = checkarg(arg)
 
-    ## normalise the signal to b=0 
-    X = normalise(X, bvalues, arg, min(bvalues))        #(note: this does not have any effect on the patient data as the data is normalized outside this function in patients.py, but for the simulations the normalisation comes here.)
+    # normalise to S(b=0)
+    X, _ = normalise(X, bvalues, min(bvalues))        #(note: this does not have any effect on the patient data as the data is normalized outside this function in patients.py, but for the simulations the normalisation is carried out here.)
 
-    
     # initialising the network of choice using the input argument arg
     bvalues = torch.FloatTensor(bvalues[:]).to(arg.train_pars.device)
     net = Net(bvalues, arg.net_pars).to(arg.train_pars.device)
 
-    # splitting data into learning and validation set; subsequently initialising the Dataloaders
+    # splitting data into learning and validation set; subsequently initialising the dataloaders
     X_train, X_validation = train_test_split(X, test_size = 1 - arg.train_pars.split, random_state=64)
 
     # train loader loads the training data and the validation loader loads the validation loader
     trainloader = create_loader_from_np(X_train, labels=False, batch_size=arg.train_pars.batch_size, shuffle=True)
     validationloader = create_loader_from_np(X_validation, labels=False, batch_size=(min(len(X_validation), 32*arg.train_pars.batch_size)), shuffle=False)
 
-    # number of iterations en each epoch for training and validation
+    # number of iterations in each epoch for training and validation
     num_training_its = np.min([arg.train_pars.maxit, len(X_train)// arg.train_pars.batch_size])
     num_validation_its = len(X_validation) // (min(len(X_validation), 32*arg.train_pars.batch_size))
 
@@ -206,35 +196,36 @@ def learn_selfsupervised(X, bvalues, arg):
     criterion = define_loss_fun(arg)
 
 
-    # Initialising parameters
+    # initialising parameters
     best_validation_loss = 1e16
     num_bad_epochs = 0
     avg_epoch_train_losses = []
     avg_epoch_validation_losses = []
     final_model = copy.deepcopy(net.state_dict())
 
-    ## Train
+    # training
     for epoch in range(5000):
-        print("-----------------------------------------------------------------")
-        print(f"Epoch: {epoch}; Bad epochs: {num_bad_epochs}")
+        print('-----------------------------------------------------------------')
+        print(f'Epoch: {epoch}; Bad epochs: {num_bad_epochs}')
         net.train()
 
         train_loss_vals = np.zeros(num_training_its)
         for i, [X_train] in enumerate(tqdm(trainloader, position=0, leave=True, total=num_training_its), 1):
-            # have a maximum number of batches per epoch to ensure regular updates of whether we are improving
+
+            # keeps track of the number of iterations per epoch
             if i > num_training_its:
                 break
 
             # zero the parameter gradients
             optimizer.zero_grad()
 
-            # put batch on GPU if pressent
+            # put batch on GPU if present
             X_train = X_train.to(arg.train_pars.device)
 
             ## forwardprop
             X_pred, _, _ = net(X_train)
             
-            # determine loss for batch; note that the loss is determined by the difference between the predicted signal and the actual signal. The loss does not look at Dt, Dp or Fp.
+            # determine training loss for batch; note that the loss is determined by the difference between the predicted signal and the true signal. The loss does not look at Dt, Dp or Fp.
             train_loss = criterion(X_pred, X_train)
             train_loss_vals[i-1] = train_loss
 
@@ -242,32 +233,36 @@ def learn_selfsupervised(X, bvalues, arg):
             train_loss.backward()
             optimizer.step()
 
+        # training loss for epoch
         avg_epoch_train_loss = np.mean(train_loss_vals)
         avg_epoch_train_losses.append(avg_epoch_train_loss)
         print(f'train loss: {avg_epoch_train_loss}')
 
 
-        # Validation
+        # validation
         net.eval()
         validation_loss_vals = np.zeros(num_validation_its)
         for i, [X_validation] in enumerate(tqdm(validationloader, position=0, leave=True), 1):
+
             # zero the parameter gradients (from previous training)
             optimizer.zero_grad()
 
-            # put batch on GPU if pressent
+            # put batch on GPU if present
             X_validation = X_validation.to(arg.train_pars.device)
             
             # do prediction, only look at predicted IVIM signal
             X_pred, _, _ = net(X_validation)
 
-            # validation loss
+            # determine validation loss for batch
             validation_loss = criterion(X_pred, X_validation)
             validation_loss_vals[i-1] = validation_loss
 
+        # validation loss for epoch
         avg_epoch_validation_loss = np.mean(validation_loss_vals)
         avg_epoch_validation_losses.append(avg_epoch_validation_loss)
         print(f'validation loss: {avg_epoch_validation_loss}')
 
+        # early stopping
         if arg.train_pars.select_best:
             if avg_epoch_validation_loss < best_validation_loss:
                 print('\n############### Saving good model ###############################')
@@ -279,45 +274,47 @@ def learn_selfsupervised(X, bvalues, arg):
                 if num_bad_epochs == arg.train_pars.patience:
                     print(f'\nDone, best validation loss: {best_validation_loss}')
                     break
-
-    print("Done")
     
-    # Restore best model
+    # restore best model
     if arg.train_pars.select_best:
         net.load_state_dict(final_model)
+
     del trainloader
     del validationloader
     if arg.train_pars.use_cuda:
         torch.cuda.empty_cache()
 
-
+    print('Sucessfull training')
     return net, avg_epoch_train_losses, avg_epoch_validation_losses, best_validation_loss
 
 
 
 
 
-
 def learn_supervised(X, y, bvalues, arg):
+    """
+    Trains supervised DNN with hyperparameters given by 'arg' using the training inputs 'X' and its 
+    corresponding training lables 'y'.
+    """
 
     torch.backends.cudnn.benchmark = True
     arg = checkarg(arg)
 
-    # normalise the signal to b=0
-    X = normalise(X, bvalues, arg, min(bvalues))
+    # normalise to S(b=0)
+    X, _ = normalise(X, bvalues, min(bvalues))
     
     # initialising the network
     bvalues = torch.FloatTensor(bvalues[:]).to(arg.train_pars.device)
     net = Net(bvalues, arg.net_pars).to(arg.train_pars.device)
 
     # splitting data into learning and validation set
-    X_train, X_validation, y_train, y_validation = train_test_split(X, y, test_size = 1-arg.train_pars.split, random_state=64)    ###
+    X_train, X_validation, y_train, y_validation = train_test_split(X, y, test_size = 1-arg.train_pars.split, random_state=64)
 
     # train loader loads the training data and the validation loader loads the validation loader
     trainloader = create_loader_from_np(X_train, y_train, labels=True, batch_size=arg.train_pars.batch_size, shuffle=True)
     validationloader = create_loader_from_np(X_validation, y_validation, labels=True, batch_size=(min(len(X_validation), 32*arg.train_pars.batch_size)), shuffle=False)
     
-    # number of iterations en each epoch for training and validation
+    # number of iterations in each epoch for training and validation
     num_training_its = np.min([arg.train_pars.maxit, len(X_train)// arg.train_pars.batch_size])
     num_validation_its = len(X_validation) // (min(len(X_validation), 32*arg.train_pars.batch_size))
 
@@ -328,14 +325,14 @@ def learn_supervised(X, y, bvalues, arg):
     criterion = define_loss_fun(arg)
 
 
-    # Initialising parameters
+    # initialising parameters
     best_validation_loss = 1e16
     num_bad_epochs = 0
     avg_epoch_train_losses = []
     avg_epoch_validation_losses = []
     final_model = copy.deepcopy(net.state_dict())
 
-    ## Train
+    # training
     for epoch in range(5000):
         print('-----------------------------------------------------------------')
         print(f'Epoch: {epoch}; Bad epochs: {num_bad_epochs}')
@@ -343,21 +340,22 @@ def learn_supervised(X, y, bvalues, arg):
 
         train_loss_vals = np.zeros(num_training_its)
         for i, [X_train, y_train] in enumerate(tqdm(trainloader, position=0, leave=False, total=num_training_its), 1):
-            # have a maximum number of batches per epoch to ensure regular updates of whether we are improving
+
+            # keeps track of the number of iterations per epoch
             if i > num_training_its:
                 break
 
-            # zero the parameter gradients
+            # zero the parameter gradients (from previous training)
             optimizer.zero_grad()
 
-            # put batch on GPU if pressent
+            # put batch on GPU if present
             X_train = X_train.to(arg.train_pars.device)
             y_train = y_train.to(arg.train_pars.device)
 
             # forwardprop
             _, _, params_pred_norm = net(X_train)
 
-            # loss
+            # determine training loss for batch; note that the loss is determined by the difference between the predicted ivim parameters and the true ivim parameters
             train_loss = criterion(params_pred_norm, y_train)
             train_loss_vals[i-1] = train_loss
 
@@ -365,32 +363,36 @@ def learn_supervised(X, y, bvalues, arg):
             train_loss.backward()
             optimizer.step()
 
+        # training loss for epoch
         avg_epoch_train_loss = np.mean(train_loss_vals)
         avg_epoch_train_losses.append(avg_epoch_train_loss)
         print(f'train loss: {avg_epoch_train_loss}')
 
 
-        # Validation
+        # validation
         net.eval()
         validation_loss_vals = np.zeros(num_validation_its)
         for i, [X_validation, y_validation] in enumerate(tqdm(validationloader, position=0, leave=False), 1):
+            
             # zero the parameter gradients (from previous training)
             optimizer.zero_grad()
 
-            # put batch on GPU if pressent
+            # put batch on GPU if present
             X_validation = X_validation.to(arg.train_pars.device)
 
             # forward
             _, _, params_pred_norm = net(X_validation)
 
-            # validation
+            # determine validation loss for batch
             validation_loss = criterion(params_pred_norm, y_validation)
             validation_loss_vals[i-1] = validation_loss
         
+        # validation loss for epoch
         avg_epoch_validation_loss = np.mean(validation_loss_vals)
         avg_epoch_validation_losses.append(avg_epoch_validation_loss)
         print(f'validation loss: {avg_epoch_validation_loss}')
 
+        # early stopping
         if arg.train_pars.select_best:
             if avg_epoch_validation_loss < best_validation_loss:
                 print('\n############### Saving good model ###############################')
@@ -403,15 +405,16 @@ def learn_supervised(X, y, bvalues, arg):
                     print(f'\nDone, best validation loss: {best_validation_loss}')
                     break
 
-    print('Done')
-    # Restore best model
+    # restore best model
     if arg.train_pars.select_best:
         net.load_state_dict(final_model)
+
     del trainloader
     del validationloader
     if arg.train_pars.use_cuda:
         torch.cuda.empty_cache()
 
+    print('Sucessfull training')
     return net, avg_epoch_train_losses, avg_epoch_validation_losses, best_validation_loss
 
 
@@ -419,44 +422,44 @@ def learn_supervised(X, y, bvalues, arg):
 
 
 def predict_IVIM(data, bvalues, net, arg):
-    arg = checkarg(arg)
+    """
+    Uses (trained) 'net' to predict the IVIM parameters of 'data'.
+    """
 
-    ## normalise the signal to b=0 and remove data with nans
-    data = normalise(data, bvalues, arg)
-    
+    # find number of voxels, normalise to S(b=0) and remove data with nans
+    raw_data_size = len(data)
+    data, isnan_idxs = normalise(data, bvalues, min(bvalues))
 
-    mylist = isnan(np.mean(data, axis=1))
-    sels = [not i for i in mylist]
-    # remove data with non-IVIM-like behaviour. Estimating IVIM parameters in these data is meaningless anyways.
-    sels = sels & (np.percentile(data[:, bvalues < 50], 0.95, axis=1) < 1.3) & (
-                   np.percentile(data[:, bvalues > 50], 0.95, axis=1) < 1.2) & (
-                   np.percentile(data[:, bvalues > 150], 0.95, axis=1) < 1.0)
-    
-    # we need this for later
-    lend = len(data)
-    data = data[sels]
+    # remove data with non-IVIM-like behaviour
+    filtered_idxs = [not i for i in isnan_idxs]
+    filtered_idxs = filtered_idxs & (np.percentile(data[:, bvalues < 50], 0.95, axis=1) < 1.3) & (
+                                     np.percentile(data[:, bvalues > 50], 0.95, axis=1) < 1.2) & (
+                                     np.percentile(data[:, bvalues > 150], 0.95, axis=1) < 1.0)
+    data = data[filtered_idxs]
 
-    # tell net it is used for evaluation
+    # net is used for evaluation
     net.eval()
+
     # initialise parameters and data
     Dp = np.array([])
     Dt = np.array([])
     Fp = np.array([])
     S0 = np.array([])
-    measured_signal_rmse = np.array([])
+    obs_signal_rmse = np.array([])
 
     # defining the loss function; signal-RMSE
-    rmse_criterion = RMSELoss().to(arg.train_pars.device)
+    rmse_criterion = from_utils.RMSELoss().to(arg.train_pars.device)
 
-    # initialise dataloader. Batch size can be way larger as we are still training.
+    # initialise dataloader. Batch size can be large as we are no longer training.
     testloader = create_loader_from_np(data, labels=False, batch_size=min(len(data), arg.train_pars.batch_size*16), shuffle=False, drop_last=False)
     num_test_its = int(np.ceil(len(data) / (min(len(data), arg.train_pars.batch_size*16))))
     
-    # start predicting
+    # prediction
     with torch.no_grad():
         test_loss_vals = np.zeros(num_test_its)
         for i, [X_test] in enumerate(tqdm(testloader, position=0, leave=True), 1):
-            # put batch on GPU if pressent
+            
+            # put batch on GPU if present
             X_test = X_test.to(arg.train_pars.device)
 
             # forward   
@@ -467,12 +470,12 @@ def predict_IVIM(data, bvalues, net, arg):
             Fp_unorm = params_unorm_pred[:, 1]
             Dp_unorm = params_unorm_pred[:, 2]
             S0_unorm = params_unorm_pred[:, 3]
-            rmses = rmse_criterion(X_test_pred, X_test, reduction='none')
+            signal_rmses = rmse_criterion(X_test_pred, X_test, reduction='none')
 
             # signal loss
-            test_loss = torch.mean(rmses)
+            test_loss = torch.mean(signal_rmses)
             test_loss_vals[i-1] = test_loss
-        
+
             try:
                 S0 = np.append(S0, (S0_unorm.cpu()).numpy())
             except:
@@ -480,40 +483,41 @@ def predict_IVIM(data, bvalues, net, arg):
             Dt = np.append(Dt, (Dt_unorm.cpu()).numpy())
             Fp = np.append(Fp, (Fp_unorm.cpu()).numpy())
             Dp = np.append(Dp, (Dp_unorm.cpu()).numpy())
-            measured_signal_rmse = np.append(measured_signal_rmse, (rmses.cpu()).numpy())
+            obs_signal_rmse = np.append(obs_signal_rmse, (signal_rmses.cpu()).numpy())
     avg_test_loss = np.mean(test_loss_vals)
 
     # The 'abs' and 'none' constraint networks have no way of figuring out what is D and D* a-priori. However, they do
-    # tend to pick one output parameter for D or D* consistently within the network. If the network has swapped D and
-    # D*, we swap them back here.
+    # tend to pick one output parameter for D or D* consistently within the network. If the network has swapped Dt and
+    # Dp, the two parameters are swaped bakc here.
     if np.mean(Dp) < np.mean(Dt):
         Dp_temp = copy.deepcopy(Dt)
         Dt = copy.deepcopy(Dp)
         Dp = copy.deepcopy(Dp_temp)
         Fp = 1 - Fp
 
-    # here we correct for the data that initially was removed as it did not have IVIM behaviour, by returning zero
-    # estimates
-    Dptrue = np.zeros(lend)
-    Dttrue = np.zeros(lend)
-    Fptrue = np.zeros(lend)
-    S0true = np.zeros(lend)
-    measured_signal_rmse_true = np.zeros(lend)
-    Dptrue[sels] = Dp
-    Dttrue[sels] = Dt
-    Fptrue[sels] = Fp
-    S0true[sels] = S0
-    measured_signal_rmse_true[sels] = measured_signal_rmse
+    # correcting for the filtered out data that did not have IVIM behaviour by returning zero estimates
+    Dp_all = np.zeros(raw_data_size)
+    Dt_all = np.zeros(raw_data_size)
+    Fp_all = np.zeros(raw_data_size)
+    S0_all = np.zeros(raw_data_size)
+    observed_signal_rmse_all = np.zeros(raw_data_size)
+    Dp_all[filtered_idxs] = Dp
+    Dt_all[filtered_idxs] = Dt
+    Fp_all[filtered_idxs] = Fp
+    S0_all[filtered_idxs] = S0
+    observed_signal_rmse_all[filtered_idxs] = obs_signal_rmse
     
     del testloader
     if arg.train_pars.use_cuda:
         torch.cuda.empty_cache()
 
-    return [Dttrue, Fptrue, Dptrue, S0true, measured_signal_rmse_true], avg_test_loss
+    return [Dt_all, Fp_all, Dp_all, S0_all, observed_signal_rmse_all], avg_test_loss
 
 
 
 
+
+# utilities to DNN
 
 def create_loader_from_np(X, y = None, labels = True, batch_size = 128, shuffle= True, drop_last = True):
 
@@ -546,7 +550,7 @@ def load_optimizer(net, arg):
 
 def define_loss_fun(arg):
     if arg.train_pars.loss_fun == 'rmse':
-        criterion = RMSELoss().to(arg.train_pars.device) 
+        criterion = from_utils.RMSELoss().to(arg.train_pars.device) 
         return criterion
     elif arg.train_pars.loss_fun == 'mse':
         criterion = nn.MSELoss().to(arg.train_pars.device)
@@ -559,29 +563,31 @@ def define_loss_fun(arg):
 
 
 
-def normalise(X_train, bvalues, arg, bref=0):
+def normalise(X_train, bvalues, bref=0):
     try:
-        ## normalise the signal to b=0 and remove data with nans
-        if arg.norm_data_full:
-            S0 = np.mean(X_train, axis=1).astype('<f')
-        else:
-            S0 = np.mean(X_train[:, bvalues == bref], axis=1).astype('<f')
+        # normalise to S(b=0) and remove data with nans
+        S0 = np.mean(X_train[:, bvalues == bref], axis=1).astype('<f')
         X_train = X_train / S0[:, None]
-        np.delete(X_train, isnan(np.mean(X_train, axis=1)), axis=0)
-        # normalise neighbours
+        isnan_idxs = isnan(np.mean(X_train, axis=1))
+        X_train = np.delete(X_train, isnan(np.mean(X_train, axis=1)), axis=0)
     except:
         S0 = torch.mean(X_train[:, bvalues == bref], axis=1)
         X_train = X_train / S0[:, None]
-        np.delete(X_train, isnan(torch.mean(X_train, axis=1)), axis=0)
-    return X_train
+        isnan_idxs = isnan(torch.mean(X_train, axis=1))
+        X_train = np.delete(X_train, isnan(torch.mean(X_train, axis=1)), axis=0)
+    return X_train, isnan_idxs
+
 
 
 def isnan(x):
-    # this program indicates what are NaNs 
+    "Returns true if nan and false if not nan."
     return x != x
 
 
 
+
+
+# check that all arguments are given
 
 def checkarg_train_pars(arg):
     if not hasattr(arg,'optim'):

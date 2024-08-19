@@ -1,3 +1,15 @@
+"""
+June 2024 by Amalie Toftum Hop
+https://github.com/AmalieTHop/TFY4910___Biophysics__Masters_Thesis
+
+Code is uploaded as part of a Master’s thesis: 
+Amalie Toftum Hop. “Deep Learning-Based Intravoxel Incoherent Motion Modelling of
+Diffusion-Weighted MRI in Head and Neck Cancer: In Silico and In Vivo Studies.
+Master thesis. Norwegian University of Science and Technology, 2024.
+"""
+
+
+
 # import
 import argparse
 import os
@@ -10,7 +22,7 @@ import torch
 
 import simulations.simulations as from_simulations
 import algorithms.DNN.DNN as from_DNN
-from simulations.simulation_params_sup_b11 import simulation_params as simulation_params
+from simulations.simulation_params_sup_b11 import simulation_params_sup_b11 as simulation_params_sup_b11
 
 
 import argparse
@@ -21,7 +33,7 @@ snr = args.snr
 
 
 
-class train_pars:
+class train_pars_sup_b11:
     def __init__(self):
         self.optim ='adamw'
         self.lr = 0.000078
@@ -37,7 +49,7 @@ class train_pars:
         self.device = torch.device("cuda:0" if self.use_cuda else "cpu")
         self.select_best = True
 
-class net_pars:
+class net_pars_sup_b11:
     def __init__(self):
         self.dropout = 0.263
         self.batch_norm = True
@@ -48,12 +60,12 @@ class net_pars:
         self.depth = 2
         self.width = 109
 
-class hyperparams_selfsupervised:
+class hyperparams_sup_b11:
     def __init__(self):
-        self.net_pars = net_pars()
-        self.train_pars = train_pars()
+        self.net_pars = net_pars_sup_b11()
+        self.train_pars = train_pars_sup_b11()
         self.norm_data_full = False
-        self.id = f'11sup_optim_snr20_nmae_0509_d{self.net_pars.depth}_w{self.net_pars.width}_o{self.train_pars.optim}_l{self.train_pars.lr}_{self.train_pars.loss_fun}_{self.net_pars.con}_d{self.net_pars.dropout}'
+        self.id = f'11sup_optim_snr20_nmaevalMS_d{self.net_pars.depth}_w{self.net_pars.width}_o{self.train_pars.optim}_l{self.train_pars.lr}_{self.train_pars.loss_fun}_{self.net_pars.con}_d{self.net_pars.dropout}'
 
 
 ########################################################
@@ -64,15 +76,15 @@ class hyperparams_selfsupervised:
 def run_sims(snr):
     print(f'SNR: {snr}')
 
-    arg_sim = simulation_params()
+    arg_sim = simulation_params_sup_b11()
     arg_sim = from_simulations.checkarg_simulation_params(arg_sim)
 
     # load hyperparameter
-    arg_dnn = hyperparams_selfsupervised()
+    arg_dnn = hyperparams_sup_b11()
     arg_dnn = from_DNN.checkarg(arg_dnn)
 
     # modify this
-    save_name = f'r{arg_sim.repeats}_optim_snr20_d0509' 
+    save_name = f'r{arg_sim.repeats}_optim_snr20'
     
     # make directory
     dir_out = f'../../../simulations/simulations_data/b{len(arg_sim.bvalues)}/snr{snr}/dnn_{arg_sim.learning}/{save_name}'
@@ -83,7 +95,7 @@ def run_sims(snr):
     # save model name
     np.save(os.path.join(dir_out, f'{arg_dnn.id}'), np.array([0]))
 
-    # run simulation
+    # run simulations
     from_simulations.sim_dnn(arg_sim, snr, arg_sim.learning, arg_dnn, dir_out)
 
 

@@ -1,9 +1,17 @@
+"""
+June 2024 by Amalie Toftum Hop
+https://github.com/AmalieTHop/TFY4910___Biophysics__Masters_Thesis
+
+Code is uploaded as part of a Master’s thesis: 
+Amalie Toftum Hop. “Deep Learning-Based Intravoxel Incoherent Motion Modelling of
+Diffusion-Weighted MRI in Head and Neck Cancer: In Silico and In Vivo Studies.
+Master thesis. Norwegian University of Science and Technology, 2024.
+"""
+
+
 
 import numpy as np
 import matplotlib.ticker
-from matplotlib import pyplot as plt
-
-import os
 
 from scipy.stats import bootstrap
 
@@ -50,41 +58,6 @@ def ivims_3d(bvals, Dt, Fp, Dp, S0):
 
     ivims = ivims_1d.reshape((Dt.shape[0], Dt.shape[1], Dt.shape[2], len(bvals)))
     return ivims
-
-
-
-def plot_loss(dir_in, dir_out, end_name = '', save_name=''):
-    params = {'axes.labelsize': 20,
-            'axes.titlesize': 22.5,
-            'lines.marker': 'None',
-            'xtick.labelsize': 15,
-            'ytick.labelsize': 15,
-            'legend.fontsize': 17.5,
-            'legend.loc':'upper right',
-            'legend.framealpha': 0.75,
-            'savefig.format': 'pdf'
-            }
-    plt.rcParams.update(params)
-
-    training_loss = np.load(os.path.join(dir_in, f'loss_train{end_name}.npy'))
-    validation_loss = np.load(os.path.join(dir_in, f'loss_val{end_name}.npy'))
-    best_validation_loss = np.load(os.path.join(dir_in, f'loss_val_best{end_name}.npy'))
-    iterations = np.arange(len(training_loss))
-
-    
-    fig, ax = plt.subplots(figsize = [8,6])
-    ax.plot(iterations, training_loss, label = "training loss")
-    ax.plot(iterations, validation_loss, label = "validation loss")
-    ax.set(xlabel = r"loss")
-    ax.set(ylabel = r"epoch #")
-    ax.legend()
-    ax.grid(True)
-    fig.tight_layout()
-
-    if not os.path.exists(dir_out):
-        os.makedirs(dir_out)
-    plt.savefig(os.path.join(dir_out, f'training_and_validation_loss{save_name}'))
-
 
 
 
